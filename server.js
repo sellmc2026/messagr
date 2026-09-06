@@ -34,29 +34,182 @@ if (!VAPID_PUBLIC_KEY || !VAPID_PRIVATE_KEY) {
 
 
 /* ========================================
-   PUSH SUBSCRIPTIONS
+   SERVER-SIDE ROOM STORAGE
    ======================================== */
 
-/*
-   endpoint ->
-   {
-       subscription,
-       room,
-       socketId
-   }
-*/
+const dataDirectory =
+    path.join(__dirname, "data");
+
+const roomsFile =
+    path.join(dataDirectory, "rooms.json");
+
+let roomsDatabase = {};
+
+try {
+
+    fs.mkdirSync(
+        dataDirectory,
+        {
+            recursive: true
+        }
+    );
+
+    if (
+        fs.existsSync(
+            roomsFile
+        )
+    ) {
+
+        const savedData =
+            fs.readFileSync(
+                roomsFile,
+                "utf8"
+            );
+
+        roomsDatabase =
+            JSON.parse(
+                savedData
+            ) || {};
+
+    }
+
+} catch (error) {
+
+    console.error(
+        "Could not load room database:",
+        error
+    );
+
+    roomsDatabase = {};
+
+}
+
+
+let databaseWriteQueue =
+    Promise.resolve();
+
+
+function getServerRoom(
+    roomCode
+) {
+
+    if (
+        !roomsDatabase[roomCode]
+    ) {
+
+        roomsDatabase[roomCode] = {
+
+            roomCode:
+                roomCode,
+
+            messages:
+                [],
+
+            updatedAt:
+                Date.now()
+
+        };
+
+    }
+
+
+    if (
+        !Array.isArray(
+            roomsDatabase[roomCode].messages
+        )
+    ) {
+
+        roomsDatabase[roomCode].messages =
+            [];
+
+    }
+
+
+    return roomsDatabase[roomCode];
+
+}
+
+
+function saveServerDatabase() {
+
+    const snapshot =
+        JSON.stringify(
+            roomsDatabase,
+            null,
+            2
+        );
+
+
+    databaseWriteQueue =
+        databaseWriteQueue
+            .then(
+                () =>
+                    fs.promises.writeFile(
+                        roomsFile,
+                        snapshot,
+                        "utf8"
+                    )
+            )
+            .catch(
+                error => {
+
+                    console.error(
+                        "Could not save room database:",
+                        error
+                    );
+
+                }
+            );
+
+
+    return databaseWriteQueue;
+
+}
+
+
+async function saveMessageToServerRoom(
+    roomCode,
+    messageData
+) {
+
+    const room =
+        getServerRoom(
+            roomCode
+        );
+
+
+    room.messages.push(
+        messageData
+    );
+
+
+    room.updatedAt =
+        Date.now();
+
+
+    await saveServerDatabase();
+
+}
+
+
+/* ========================================
+   PUSH SUBSCRIPTIONS
+   ======================================== */
 
 const pushSubscriptions =
     new Map();
 
 
 /* ========================================
-   HTTP SERVER
+   CREATE HTTP SERVER
    ======================================== */
 
 const server =
     http.createServer(
-        async (request, response) => {
+        async (
+            request,
+            response
+        ) => {
 
             /* ========================================
                VAPID PUBLIC KEY
@@ -76,10 +229,12 @@ const server =
                 );
 
                 response.end(
-                    VAPID_PUBLIC_KEY || ""
+                    VAPID_PUBLIC_KEY ||
+                    ""
                 );
 
                 return;
+
             }
 
 
@@ -90,17 +245,20 @@ const server =
             if (
                 request.url ===
                     "/api/save-subscription" &&
-                request.method === "POST"
+                request.method ===
+                    "POST"
             ) {
 
-                let body = "";
+                let body =
+                    "";
 
 
                 request.on(
                     "data",
                     chunk => {
 
-                        body += chunk;
+                        body +=
+                            chunk.toString();
 
                     }
                 );
@@ -113,27 +271,14 @@ const server =
                         try {
 
                             const data =
-                                JSON.parse(body);
-
-
-                            const subscription =
-                                data.subscription;
-
-                            const socketId =
-                                data.socketId;
-
-                            const room =
-                                typeof data.room ===
-                                "string"
-                                    ? data.room
-                                    : "";
+                                JSON.parse(
+                                    body
+                                );
 
 
                             if (
-                                !subscription ||
-                                !subscription.endpoint ||
-                                !socketId ||
-                                !room
+                                !data.subscription ||
+                                !data.subscription.endpoint
                             ) {
 
                                 response.writeHead(
@@ -145,89 +290,56 @@ const server =
                                 );
 
                                 response.end(
-                                    JSON.stringify({
-                                        success: false
-                                    })
+                                    JSON.stringify(
+                                        {
+                                            success:
+                                                false
+                                        }
+                                    )
                                 );
 
                                 return;
-                            }
 
-
-                            /*
-                               Make sure this socket
-                               really belongs to this room.
-                            */
-
-                            const socket =
-                                io.sockets.sockets.get(
-                                    socketId
-                                );
-
-
-                            if (
-                                !socket ||
-                                socket.currentRoom !== room
-                            ) {
-
-                                response.writeHead(
-                                    403,
-                                    {
-                                        "Content-Type":
-                                            "application/json"
-                                    }
-                                );
-
-                                response.end(
-                                    JSON.stringify({
-                                        success: false
-                                    })
-                                );
-
-                                return;
                             }
 
 
                             pushSubscriptions.set(
-                                subscription.endpoint,
+                                data.subscription.endpoint,
                                 {
                                     subscription:
-                                        subscription,
-
-                                    room:
-                                        room,
+                                        data.subscription,
 
                                     socketId:
-                                        socketId
+                                        data.socketId,
+
+                                    room:
+                                        data.room
                                 }
                             );
 
 
-                            console.log(
-                                "Push subscription saved for room " +
-                                room
-                            );
-
-
                             response.writeHead(
-                                201,
+                                200,
                                 {
                                     "Content-Type":
                                         "application/json"
                                 }
                             );
 
-                            response.end(
-                                JSON.stringify({
-                                    success: true
-                                })
-                            );
 
+                            response.end(
+                                JSON.stringify(
+                                    {
+                                        success:
+                                            true
+                                    }
+                                )
+                            );
 
                         } catch (error) {
 
                             console.error(
-                                "Subscription error:",
+                                "Could not save push subscription:",
                                 error
                             );
 
@@ -240,10 +352,14 @@ const server =
                                 }
                             );
 
+
                             response.end(
-                                JSON.stringify({
-                                    success: false
-                                })
+                                JSON.stringify(
+                                    {
+                                        success:
+                                            false
+                                    }
+                                )
                             );
 
                         }
@@ -253,39 +369,47 @@ const server =
 
 
                 return;
+
             }
 
 
             /* ========================================
-               NORMAL WEBSITE FILES
+               SERVE STATIC FILES
                ======================================== */
 
-            let requestedPath =
+            let filePath =
                 request.url.split("?")[0];
 
 
             if (
-                requestedPath === "/"
+                filePath ===
+                "/"
             ) {
 
-                requestedPath =
+                filePath =
                     "/index.html";
 
             }
 
 
-            /*
-               Prevent paths such as ../
-            */
+            const publicDirectory =
+                path.join(
+                    __dirname,
+                    "public"
+                );
 
-            const safePath =
-                path.normalize(
-                    requestedPath
+
+            const requestedPath =
+                path.join(
+                    publicDirectory,
+                    filePath
                 );
 
 
             if (
-                safePath.includes("..")
+                !requestedPath.startsWith(
+                    publicDirectory
+                )
             ) {
 
                 response.writeHead(
@@ -293,136 +417,100 @@ const server =
                 );
 
                 response.end(
-                    "403 - Forbidden"
+                    "Forbidden"
                 );
 
                 return;
+
             }
 
 
-            const filePath =
-                path.join(
-                    __dirname,
-                    "public",
-                    safePath
+            try {
+
+                const file =
+                    await fs.promises.readFile(
+                        requestedPath
+                    );
+
+
+                const extension =
+                    path.extname(
+                        requestedPath
+                    ).toLowerCase();
+
+
+                const contentTypes = {
+
+                    ".html":
+                        "text/html",
+
+                    ".js":
+                        "application/javascript",
+
+                    ".css":
+                        "text/css",
+
+                    ".json":
+                        "application/json",
+
+                    ".png":
+                        "image/png",
+
+                    ".jpg":
+                        "image/jpeg",
+
+                    ".jpeg":
+                        "image/jpeg",
+
+                    ".gif":
+                        "image/gif",
+
+                    ".webp":
+                        "image/webp",
+
+                    ".svg":
+                        "image/svg+xml",
+
+                    ".mp3":
+                        "audio/mpeg",
+
+                    ".wav":
+                        "audio/wav",
+
+                    ".ico":
+                        "image/x-icon"
+
+                };
+
+
+                response.writeHead(
+                    200,
+                    {
+                        "Content-Type":
+                            contentTypes[
+                                extension
+                            ] ||
+                            "application/octet-stream"
+                    }
                 );
 
 
-            fs.readFile(
-                filePath,
-                (error, data) => {
-
-                    if (error) {
-
-                        response.writeHead(
-                            404
-                        );
-
-                        response.end(
-                            "404 - Page not found"
-                        );
-
-                        return;
-                    }
+                response.end(
+                    file
+                );
 
 
-                    let contentType =
-                        "text/html";
+            } catch (error) {
 
+                response.writeHead(
+                    404
+                );
 
-                    if (
-                        requestedPath.endsWith(
-                            ".js"
-                        )
-                    ) {
+                response.end(
+                    "Not found"
+                );
 
-                        contentType =
-                            "application/javascript";
-
-                    } else if (
-                        requestedPath.endsWith(
-                            ".css"
-                        )
-                    ) {
-
-                        contentType =
-                            "text/css";
-
-                    } else if (
-                        requestedPath.endsWith(
-                            ".png"
-                        )
-                    ) {
-
-                        contentType =
-                            "image/png";
-
-                    } else if (
-                        requestedPath.endsWith(
-                            ".jpg"
-                        ) ||
-                        requestedPath.endsWith(
-                            ".jpeg"
-                        )
-                    ) {
-
-                        contentType =
-                            "image/jpeg";
-
-                    } else if (
-                        requestedPath.endsWith(
-                            ".gif"
-                        )
-                    ) {
-
-                        contentType =
-                            "image/gif";
-
-                    } else if (
-                        requestedPath.endsWith(
-                            ".webp"
-                        )
-                    ) {
-
-                        contentType =
-                            "image/webp";
-
-                    } else if (
-                        requestedPath.endsWith(
-                            ".mp3"
-                        )
-                    ) {
-
-                        contentType =
-                            "audio/mpeg";
-
-                    } else if (
-                        requestedPath.endsWith(
-                            ".ico"
-                        )
-                    ) {
-
-                        contentType =
-                            "image/x-icon";
-
-                    }
-
-
-                    response.writeHead(
-                        200,
-                        {
-                            "Content-Type":
-                                contentType
-                        }
-                    );
-
-
-                    response.end(
-                        data
-                    );
-
-                }
-            );
+            }
 
         }
     );
@@ -433,9 +521,19 @@ const server =
    ======================================== */
 
 const io =
-    new Server(server, {
-        maxHttpBufferSize: 10 * 1024 * 1024
-    });
+    new Server(
+        server,
+        {
+            cors:
+                {
+                    origin:
+                        "*"
+                },
+
+            maxHttpBufferSize:
+                10 * 1024 * 1024
+        }
+    );
 
 
 /* ========================================
@@ -444,69 +542,73 @@ const io =
 
 io.on(
     "connection",
-    (socket) => {
+    socket => {
 
         console.log(
-            "Someone connected!"
+            "User connected:",
+            socket.id
         );
 
 
+        socket.username =
+            "user";
+
+        socket.currentRoom =
+            null;
+
+
         /* ========================================
-           JOIN MESSAGE CODE
+           JOIN ROOM
            ======================================== */
 
         socket.on(
             "joinRoom",
-            (data) => {
+            data => {
+
+                let username;
+                let roomCode;
+
 
                 if (
-                    !data ||
-                    typeof data !== "object"
-                ) {
-
-                    return;
-
-                }
-
-
-                let code =
-                    typeof data.code ===
+                    typeof data ===
                     "string"
-                        ? data.code
-                            .trim()
-                            .toUpperCase()
-                        : "";
+                ) {
 
+                    roomCode =
+                        data;
 
-                let username =
-                    typeof data.username ===
-                    "string"
-                        ? data.username.trim()
-                        : "";
+                    username =
+                        "user";
+
+                } else {
+
+                    username =
+                        data &&
+                        data.username
+                            ? String(
+                                data.username
+                            ).trim()
+                            : "user";
+
+                    roomCode =
+                        data &&
+                        data.room
+                            ? String(
+                                data.room
+                            ).trim()
+                            : "";
+
+                }
 
 
                 if (
-                    !code ||
-                    !username
+                    !roomCode
                 ) {
 
                     return;
 
                 }
 
-
-                if (
-                    username.length > 8
-                ) {
-
-                    return;
-
-                }
-
-
-                /* ========================================
-                   LEAVE PREVIOUS ROOM
-                   ======================================== */
 
                 if (
                     socket.currentRoom
@@ -519,50 +621,111 @@ io.on(
                 }
 
 
-                /* ========================================
-                   SAVE USERNAME
-                   ======================================== */
-
                 socket.username =
-                    username;
-
-
-                /* ========================================
-                   JOIN ROOM
-                   ======================================== */
-
-                socket.join(
-                    code
-                );
+                    username ||
+                    "user";
 
 
                 socket.currentRoom =
-                    code;
+                    roomCode;
 
 
-                /* ========================================
-                   TELL EVERYONE SOMEONE JOINED
-                   ======================================== */
+                socket.join(
+                    roomCode
+                );
 
-                io.to(code).emit(
+
+                getServerRoom(
+                    roomCode
+                );
+
+
+                socket.emit(
+                    "joinedRoom",
+                    roomCode
+                );
+
+
+                socket.to(
+                    roomCode
+                ).emit(
                     "userJoined",
-                    username
+                    socket.username
                 );
 
 
                 console.log(
-                    `${username} joined room ${code}`
+                    socket.username +
+                    " joined room " +
+                    roomCode
                 );
 
+            }
+        );
 
-                /* ========================================
-                   TELL PERSON WHO JOINED
-                   ======================================== */
 
-                socket.emit(
-                    "joinedRoom",
-                    code
-                );
+        /* ========================================
+           GET SERVER ROOM HISTORY
+           ======================================== */
+
+        socket.on(
+            "getRoomHistory",
+            (
+                roomCode,
+                callback
+            ) => {
+
+                if (
+                    typeof roomCode !==
+                        "string" ||
+                    socket.currentRoom !==
+                        roomCode
+                ) {
+
+                    if (
+                        typeof callback ===
+                        "function"
+                    ) {
+
+                        callback(
+                            {
+                                success:
+                                    false,
+
+                                messages:
+                                    []
+                            }
+                        );
+
+                    }
+
+                    return;
+
+                }
+
+
+                const room =
+                    getServerRoom(
+                        roomCode
+                    );
+
+
+                if (
+                    typeof callback ===
+                    "function"
+                ) {
+
+                    callback(
+                        {
+                            success:
+                                true,
+
+                            messages:
+                                room.messages
+                        }
+                    );
+
+                }
 
             }
         );
@@ -574,7 +737,7 @@ io.on(
 
         socket.on(
             "sendMessage",
-            async (message) => {
+            async message => {
 
                 if (
                     !socket.currentRoom
@@ -608,9 +771,28 @@ io.on(
                 }
 
 
-                /* ========================================
-                   NORMAL CHAT MESSAGE
-                   ======================================== */
+                const messageData = {
+
+                    type:
+                        "text",
+
+                    text:
+                        message,
+
+                    username:
+                        socket.username,
+
+                    timestamp:
+                        Date.now()
+
+                };
+
+
+                await saveMessageToServerRoom(
+                    socket.currentRoom,
+                    messageData
+                );
+
 
                 io.to(
                     socket.currentRoom
@@ -628,10 +810,6 @@ io.on(
                     }
                 );
 
-
-                /* ========================================
-                   PUSH NOTIFICATIONS
-                   ======================================== */
 
                 if (
                     !VAPID_PUBLIC_KEY ||
@@ -651,11 +829,6 @@ io.on(
                     of pushSubscriptions
                 ) {
 
-                    /*
-                       Only notify people
-                       in the same room.
-                    */
-
                     if (
                         saved.room !==
                         socket.currentRoom
@@ -665,11 +838,6 @@ io.on(
 
                     }
 
-
-                    /*
-                       Don't notify the
-                       person who sent it.
-                    */
 
                     if (
                         saved.socketId ===
@@ -686,22 +854,21 @@ io.on(
                         await webpush.sendNotification(
                             saved.subscription,
 
-                            JSON.stringify({
-                                username:
-                                    socket.username,
+                            JSON.stringify(
+                                {
+                                    username:
+                                        socket.username,
 
-                                text:
-                                    message
-                            })
+                                    text:
+                                        message
+                                }
+                            )
                         );
 
 
-                        console.log(
-                            "Push notification sent."
-                        );
-
-
-                    } catch (error) {
+                    } catch (
+                        error
+                    ) {
 
                         console.error(
                             "Push notification failed:",
@@ -709,12 +876,6 @@ io.on(
                             error.message
                         );
 
-
-                        /*
-                           404 / 410 usually means
-                           the subscription is no
-                           longer valid.
-                        */
 
                         if (
                             error.statusCode ===
@@ -743,11 +904,7 @@ io.on(
 
         socket.on(
             "sendImage",
-            (data) => {
-
-                /* ========================================
-                   MAKE SURE USER IS IN A ROOM
-                   ======================================== */
+            async data => {
 
                 if (
                     !socket.currentRoom
@@ -758,13 +915,10 @@ io.on(
                 }
 
 
-                /* ========================================
-                   VALIDATE DATA
-                   ======================================== */
-
                 if (
                     !data ||
-                    typeof data !== "object"
+                    typeof data !==
+                        "object"
                 ) {
 
                     return;
@@ -783,34 +937,83 @@ io.on(
 
 
                 /*
-                  ONLY ALLOW IMAGE TYPES OR IMAGE URLS
-               */
-               
-               if (
-                   typeof data.type !== "string"
-               ) {
-                   return;
-               }
-               
-               const isImageType =
-                   data.type.startsWith("image/");
-               
-               const isImageUrl =
-                   data.type === "image/url" &&
-                   typeof data.image === "string" &&
-                   /^https?:\/\/.+/i.test(data.image);
-               
-               if (
-                   !isImageType &&
-                   !isImageUrl
-               ) {
-                   return;
-               }
+                   Only allow image MIME types
+                   or image URLs.
+                */
+
+                const validMimeType =
+                    typeof data.type ===
+                        "string" &&
+                    data.type.startsWith(
+                        "image/"
+                    );
 
 
-                /* ========================================
-                   SEND IMAGE TO ROOM
-                   ======================================== */
+                const validUrl =
+                    data.type ===
+                        "image/url";
+
+
+                if (
+                    !validMimeType &&
+                    !validUrl
+                ) {
+
+                    return;
+
+                }
+
+
+                if (
+                    typeof data.image !==
+                    "string"
+                ) {
+
+                    return;
+
+                }
+
+
+                /*
+                   Prevent extremely large
+                   messages from being stored.
+                */
+
+                if (
+                    data.image.length >
+                    8 * 1024 * 1024
+                ) {
+
+                    return;
+
+                }
+
+
+                const imageData = {
+
+                    type:
+                        "image",
+
+                    image:
+                        data.image,
+
+                    mimeType:
+                        data.type,
+
+                    username:
+                        socket.username,
+
+                    timestamp:
+                        Date.now()
+
+                };
+
+
+                await saveMessageToServerRoom(
+                    socket.currentRoom,
+                    imageData
+                );
+
 
                 io.to(
                     socket.currentRoom
@@ -831,11 +1034,6 @@ io.on(
                     }
                 );
 
-
-                console.log(
-                    `${socket.username} sent an image in room ${socket.currentRoom}`
-                );
-
             }
         );
 
@@ -849,19 +1047,31 @@ io.on(
             () => {
 
                 console.log(
-                    "Someone disconnected."
+                    "User disconnected:",
+                    socket.id
                 );
 
 
-                /*
-                   IMPORTANT:
-                   We do NOT delete the push
-                   subscription here.
+                for (
+                    const [
+                        endpoint,
+                        saved
+                    ]
+                    of pushSubscriptions
+                ) {
 
-                   This allows notifications
-                   to work when the user closes
-                   the webpage.
-                */
+                    if (
+                        saved.socketId ===
+                        socket.id
+                    ) {
+
+                        pushSubscriptions.delete(
+                            endpoint
+                        );
+
+                    }
+
+                }
 
             }
         );
@@ -874,13 +1084,18 @@ io.on(
    START SERVER
    ======================================== */
 
+const PORT =
+    process.env.PORT ||
+    3000;
+
+
 server.listen(
-    process.env.PORT || 3000,
-    "0.0.0.0",
+    PORT,
     () => {
 
         console.log(
-            "Message server is running"
+            "Messagr server running on port " +
+            PORT
         );
 
     }
