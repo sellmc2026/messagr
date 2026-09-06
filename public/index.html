@@ -328,6 +328,22 @@
     <script>
 
     /* ========================================
+       CHECK IF WELCOME SCREEN WAS COMPLETED
+       ======================================== */
+
+    if (
+        localStorage.getItem(
+            "messagrWelcomeCompleted"
+        ) === "true"
+    ) {
+
+        window.location.href =
+            "messagr.html";
+
+    }
+
+
+    /* ========================================
        USERNAME
        ======================================== */
 
@@ -394,6 +410,14 @@
             );
 
 
+            /* Mark welcome screen as completed */
+
+            localStorage.setItem(
+                "messagrWelcomeCompleted",
+                "true"
+            );
+
+
             /* Go to main Messagr page */
 
             window.location.href =
@@ -421,8 +445,6 @@
     );
 
 </script>
-
-          
 
 
 </body>
