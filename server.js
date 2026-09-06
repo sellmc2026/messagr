@@ -592,11 +592,11 @@ io.on(
 
                     roomCode =
                         data &&
-                        data.room
-                            ? String(
-                                data.room
-                            ).trim()
-                            : "";
+                        data.code
+                           ? String(
+                              data.code
+                           ).trim()
+                           : "";
 
                 }
 
