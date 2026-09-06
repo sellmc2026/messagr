@@ -895,6 +895,177 @@ function createSystemMessageElement(
 
 
 /* ========================================
+   SYNC ROOM FROM SERVER
+   ======================================== */
+
+function getRoomHistoryFromServer(roomCode) {
+
+    return new Promise(
+        function(resolve) {
+
+            if (
+                !socket.connected
+            ) {
+
+                resolve(null);
+
+                return;
+
+            }
+
+
+            let finished =
+                false;
+
+
+            const timeout =
+                setTimeout(
+                    function() {
+
+                        if (
+                            finished
+                        ) {
+
+                            return;
+
+                        }
+
+
+                        finished =
+                            true;
+
+
+                        resolve(
+                            null
+                        );
+
+                    },
+                    7000
+                );
+
+
+            socket.emit(
+                "getRoomHistory",
+                roomCode,
+
+                function(response) {
+
+                    if (
+                        finished
+                    ) {
+
+                        return;
+
+                    }
+
+
+                    finished =
+                        true;
+
+
+                    clearTimeout(
+                        timeout
+                    );
+
+
+                    if (
+                        !response ||
+                        !response.success ||
+                        !Array.isArray(
+                            response.messages
+                        )
+                    ) {
+
+                        resolve(
+                            null
+                        );
+
+                        return;
+
+                    }
+
+
+                    resolve(
+                        response.messages
+                    );
+
+                }
+            );
+
+        }
+    );
+
+}
+
+
+async function syncRoomFromServer(
+    roomCode
+) {
+
+    const serverMessages =
+        await getRoomHistoryFromServer(
+            roomCode
+        );
+
+
+    if (
+        !Array.isArray(
+            serverMessages
+        )
+    ) {
+
+        return false;
+
+    }
+
+
+    const username =
+        (
+            localStorage.getItem(
+                "messagrUsername"
+            ) || ""
+        ).trim();
+
+
+    const localMessages =
+        serverMessages.map(
+            function(data) {
+
+                return {
+
+                    ...data,
+
+                    mine:
+                        data.username ===
+                        username
+
+                };
+
+            }
+        );
+
+
+    await saveRoomToDatabase(
+        {
+            roomCode:
+                roomCode,
+
+            messages:
+                localMessages,
+
+            updatedAt:
+                Date.now()
+
+        }
+    );
+
+
+    return true;
+
+}
+
+
+/* ========================================
    LOAD ROOM CHAT
    ======================================== */
 
@@ -910,254 +1081,6 @@ async function loadRoomChat(
 
     }
 
-
-    /* ========================================
-       CLEAR OLD CHAT
-       ======================================== */
-
-    messages.innerHTML =
-        "";
-
-
-    let serverMessages =
-        [];
-
-
-    /* ========================================
-       GET CHAT HISTORY FROM SERVER
-       ======================================== */
-
-    if (
-        socket.connected
-    ) {
-
-        try {
-
-            serverMessages =
-                await new Promise(
-                    function(resolve) {
-
-                        socket.emit(
-                            "getRoomHistory",
-
-                            roomCode,
-
-                            function(response) {
-
-                                if (
-                                    response &&
-                                    response.success &&
-                                    Array.isArray(
-                                        response.messages
-                                    )
-                                ) {
-
-                                    resolve(
-                                        response.messages
-                                    );
-
-                                } else {
-
-                                    resolve(
-                                        []
-                                    );
-
-                                }
-
-                            }
-                        );
-
-                    }
-                );
-
-        } catch (error) {
-
-            console.error(
-                "Could not load server chat history:",
-                error
-            );
-
-        }
-
-    }
-
-
-    /* ========================================
-       DISPLAY SERVER HISTORY
-       ======================================== */
-
-    if (
-        serverMessages.length > 0
-    ) {
-
-        serverMessages.forEach(
-            function(data) {
-
-                /*
-                   Figure out whether this
-                   message was sent by us.
-                */
-
-                const myUsername =
-                    localStorage.getItem(
-                        "messagrUsername"
-                    );
-
-
-                const messageData = {
-
-                    ...data,
-
-                    mine:
-                        data.username ===
-                        myUsername
-
-                };
-
-
-                let element =
-                    null;
-
-
-                if (
-                    data.type ===
-                    "image"
-                ) {
-
-                    element =
-                        createImageMessageElement(
-                            messageData
-                        );
-
-                } else if (
-                    data.type ===
-                    "system"
-                ) {
-
-                    element =
-                        createSystemMessageElement(
-                            data.text
-                        );
-
-                } else {
-
-                    element =
-                        createTextMessageElement(
-                            messageData
-                        );
-
-                }
-
-
-                if (
-                    element
-                ) {
-
-                    messages.appendChild(
-                        element
-                    );
-
-                }
-
-            }
-        );
-
-    }
-
-
-    /* ========================================
-       FALL BACK TO LOCAL CHAT
-       ======================================== */
-
-    else {
-
-        try {
-
-            const room =
-                await getRoomFromDatabase(
-                    roomCode
-                );
-
-
-            if (
-                room &&
-                Array.isArray(
-                    room.messages
-                )
-            ) {
-
-                room.messages.forEach(
-                    function(data) {
-
-                        let element =
-                            null;
-
-
-                        if (
-                            data.type ===
-                            "image"
-                        ) {
-
-                            element =
-                                createImageMessageElement(
-                                    data
-                                );
-
-                        } else if (
-                            data.type ===
-                            "system"
-                        ) {
-
-                            element =
-                                createSystemMessageElement(
-                                    data.text
-                                );
-
-                        } else {
-
-                            element =
-                                createTextMessageElement(
-                                    data
-                                );
-
-                        }
-
-
-                        if (
-                            element
-                        ) {
-
-                            messages.appendChild(
-                                element
-                            );
-
-                        }
-
-                    }
-                );
-
-            }
-
-        } catch (error) {
-
-            console.error(
-                "Could not load local chat:",
-                error
-            );
-
-        }
-
-    }
-
-
-    /* ========================================
-       SCROLL TO BOTTOM
-       ======================================== */
-
-    messages.scrollTop =
-        messages.scrollHeight;
-
-}
 
     /* ========================================
        CLEAR OLD CHAT FIRST
@@ -2184,12 +2107,35 @@ socket.on(
 
 
         /* ========================================
+           SYNC SERVER CHAT HISTORY
+           ======================================== */
+
+        const serverHistoryLoaded =
+            await syncRoomFromServer(
+                currentRoomCode
+            );
+
+
+        /* ========================================
            LOAD THIS ROOM'S SAVED CHAT
            ======================================== */
 
         await loadRoomChat(
             currentRoomCode
         );
+
+
+        if (
+            !serverHistoryLoaded &&
+            status
+        ) {
+
+            status.textContent =
+                "Connected to " +
+                currentRoomCode +
+                " (server history unavailable)";
+
+        }
 
 
         /* ========================================
@@ -2531,6 +2477,7 @@ function sendMessage() {
 
     messageInput.value = "";
 }
+
 
 /* ========================================
    ENTER TO SEND
@@ -3499,6 +3446,5 @@ document.querySelectorAll("button").forEach(button => {
         buttonClickSound.play();
     });
 });
-
 
 
