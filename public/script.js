@@ -2095,17 +2095,40 @@ socket.on(
 
 
         /* ========================================
-           SHOW CHAT
-           ======================================== */
+            SHOW CHAT
+            ======================================== */
 
+         console.log(
+             "CHAT ELEMENT:",
+             chat
+         );
+         
          if (chat) {
-   
-               chat.style.setProperty(
-                  "display",
-                  "flex",
-                  "important"
-               );
-            
+         
+             chat.style.setProperty(
+                 "display",
+                 "flex",
+                 "important"
+             );
+         
+             chat.style.setProperty(
+                 "visibility",
+                 "visible",
+                 "important"
+             );
+         
+             chat.style.setProperty(
+                 "opacity",
+                 "1",
+                 "important"
+             );
+         
+             chat.style.setProperty(
+                 "z-index",
+                 "9999",
+                 "important"
+             );
+         
          }
 
 
