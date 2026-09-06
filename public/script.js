@@ -2506,6 +2506,26 @@ function sendMessage() {
 
 
 /* ========================================
+   SEND BUTTON
+   ======================================== */
+
+if (sendButton) {
+
+    sendButton.addEventListener(
+        "click",
+        function(event) {
+
+            event.preventDefault();
+
+            sendMessage();
+
+        }
+    );
+
+}
+
+
+/* ========================================
    ENTER TO SEND
    ======================================== */
 
