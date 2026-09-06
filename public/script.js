@@ -2098,15 +2098,15 @@ socket.on(
            SHOW CHAT
            ======================================== */
 
-      if (chat) {
-
-            chat.style.setProperty(
-               "display",
-               "flex",
-               "important"
-            );
-         
-      }
+         if (chat) {
+   
+               chat.style.setProperty(
+                  "display",
+                  "flex",
+                  "important"
+               );
+            
+         }
 
 
         /* ========================================
